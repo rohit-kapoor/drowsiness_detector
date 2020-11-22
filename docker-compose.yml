@@ -1,0 +1,188 @@
+version: '3.8'
+
+services:
+
+  ml_module:
+    build:
+      context: ./src/ml_module/
+      dockerfile: Dockerfile
+    depends_on:
+    - "postgres"
+    environment:
+    - PORT=${ML_PORT}
+    - DATABASE_URL=postgres://${DB_USER}:${DB_PASS}@postgres:${DB_PORT}/${DB_NAME}
+    networks:
+    - back_tier
+
+  frontend:
+    build:
+      context: ./src/frontend/
+      dockerfile: Dockerfile
+    depends_on:
+    - "postgres"
+    environment:
+    - PORT=${REACT_PORT}
+    networks:
+    - front_tier
+
+  server:
+    build:
+      context: ./src/backend/server/
+      dockerfile: Dockerfile
+    depends_on:
+    - "postgres"
+    environment:
+    - PORT=${MS_CANCELTRIP_PORT}
+    - DATABASE_URL=postgres://${DB_USER}:${DB_PASS}@postgres:${DB_PORT}/${DB_NAME}
+    networks:
+    - back_tier
+
+  postgres:
+    image: postgres:13
+    restart: always
+    volumes:
+    - type: volume
+      source: db_data
+      target: /var/lib/postgresql/data/
+    networks:
+    - back_tier
+    environment:
+    - POSTGRES_USER=${DB_USER}
+    - POSTGRES_PASSWORD=${DB_PASS}
+    - POSTGRES_PORT=${DB_PORT}
+    - POSTGRES_DB=${DB_NAME}
+
+  prometheus:
+    image: prom/prometheus:v2.22.0
+    restart: always
+    volumes:
+    - type: bind
+      source: ./src/backend/prometheus/
+      target: /etc/prometheus/
+    - type: volume
+      source: prometheus_data
+      target: /prometheus/
+    command:
+    - '--config.file=/etc/prometheus/prometheus.yml'
+    - '--storage.tsdb.path=/prometheus'
+    - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+    - '--web.console.templates=/usr/share/prometheus/consoles'
+    - '--storage.tsdb.retention.time=${PROMETHEUS_STORAGE_DURATION}'
+    - '--web.enable-lifecycle'
+    ports:
+    - ${PROMETHEUS_PORT}:9090
+    networks:
+    - monitor
+    depends_on:
+    - cadvisor
+    labels:
+      org.label-schema.group: "monitoring"
+
+  cadvisor:
+    image: gcr.io/google_containers/cadvisor:v0.36.0
+    restart: always
+    volumes:
+    - type: bind
+      source: /
+      target: /rootfs/
+      read_only: true
+    - type: bind
+      source: /var/run/
+      target: /var/run/
+    - type: bind
+      source: /sys/
+      target: /sys/
+      read_only: true
+    - type: bind
+      source: /var/lib/docker/
+      target: /var/lib/docker/
+      read_only: true
+    ports:
+    - ${PROMETHEUS_CADVISOR_PORT}:8080
+    networks:
+    - monitor
+    depends_on:
+    - postgres
+    - graphql_engine
+    labels:
+      org.label-schema.group: "monitoring"
+
+  grafana:
+    image: grafana/grafana:7.2.2
+    restart: always
+    user: "472"
+    depends_on:
+    - prometheus
+    ports:
+    - ${GRAFANA_PORT}:3000
+    volumes:
+    - type: volume
+      source: grafana_data
+      target: /var/lib/grafana/
+    - type: bind
+      source: ./src/backend/grafana/provisioning/
+      target: /etc/grafana/provisioning/
+    environment:
+    - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+    - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
+    - GF_USERS_ALLOW_SIGN_UP=false
+    - PROMETHEUS_PORT=${PROMETHEUS_PORT}
+    networks:
+    - monitor
+    labels:
+      org.label-schema.group: "monitoring"
+
+  node-exporter:
+    image: prom/node-exporter:v1.0.1
+    restart: always
+    volumes:
+    - type: bind
+      source: /
+      target: /rootfs/
+      read_only: true
+    - type: bind
+      source: /sys/
+      target: /host/sys/
+      read_only: true
+    - type: bind
+      source: /proc/
+      target: /host/proc/
+      read_only: true
+    command: 
+    - '--path.procfs=/host/proc'
+    - '--path.sysfs=/host/sys'
+    - --collector.filesystem.ignored-mount-points
+    - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+    ports:
+    - ${PROMETHEUS_NODE_EXPORTER_PORT}:9100
+    networks:
+    - monitor
+    labels:
+      org.label-schema.group: "monitoring"
+
+  alertmanager:
+    image: prom/alertmanager:v0.21.0
+    restart: always
+    volumes:
+    - type: bind
+      source: ./src/backend/alertmanager/
+      target: /etc/alertmanager/
+    command:
+    - '--config.file=/etc/alertmanager/config.yml'
+    - '--storage.path=/alertmanager'
+    ports:
+    - ${PROMETHEUS_ALERTMANAGER_PORT}:9093
+    networks:
+    - monitor
+    labels:
+      org.label-schema.group: "monitoring"
+
+volumes:
+  db_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  front_tier:
+  back_tier:
+  monitor:
