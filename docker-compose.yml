@@ -32,7 +32,7 @@ services:
     depends_on:
     - "postgres"
     environment:
-    - PORT=${MS_CANCELTRIP_PORT}
+    - PORT=${SERVER_PORT}
     - DATABASE_URL=postgres://${DB_USER}:${DB_PASS}@postgres:${DB_PORT}/${DB_NAME}
     networks:
     - back_tier
