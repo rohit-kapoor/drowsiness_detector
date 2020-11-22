@@ -1,7 +1,14 @@
 package main
 
-import "fmt"
+import (
+	"log"
+
+	"github.com/Yash-Handa/drowsiness_detector/src/backend/server/pkg/api"
+)
 
 func main() {
-	fmt.Println("Yash setup your backend in here...")
+	err := api.StartServer()
+	if err != nil {
+		log.Fatal("The Server couldn't start:", err)
+	}
 }
